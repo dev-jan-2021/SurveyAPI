@@ -29,7 +29,28 @@ namespace SurveyAPI.Controllers
             // Add the survey to the database
             _context.Surveys.Add(survey);
             await _context.SaveChangesAsync();
+            if (survey.Questions != null && survey.Questions.Any())
+            {
+                foreach (var question in survey.Questions)
+                {
+                    question.Id = 0;
+                    question.SurveyId = survey.Id;
 
+                    if (question.Answers != null && question.Answers.Any())
+                    {
+                        foreach (var answer in question.Answers)
+                        {
+                            answer.Id = 0;
+                            answer.QuestionId = question.Id;
+                            _context.Answers.Add(answer);
+                        }
+                    }
+
+                    _context.Questions.Add(question);
+                }
+
+                await _context.SaveChangesAsync();
+            }
             // Return the created survey
             return CreatedAtAction(nameof(GetSurvey), new { id = survey.Id }, survey);
         }
@@ -38,7 +59,7 @@ namespace SurveyAPI.Controllers
         [HttpGet]
         public async Task<IActionResult> GetSurveys()
         {
-            var surveys = await _context.Surveys.Include(s => s.Questions).ToListAsync();
+            var surveys = await _context.Surveys.Include(s => s.Questions).ThenInclude(q => q.Answers).ToListAsync();
             return Ok(surveys);
         }
 
@@ -46,7 +67,7 @@ namespace SurveyAPI.Controllers
         [HttpGet("{id}")]
         public async Task<IActionResult> GetSurvey(int id)
         {
-            var survey = await _context.Surveys.Include(s => s.Questions).FirstOrDefaultAsync(s => s.Id == id);
+            var survey = await _context.Surveys.Include(s => s.Questions).ThenInclude(q => q.Answers).FirstOrDefaultAsync(s => s.Id == id);
             if (survey == null)
             {
                 return NotFound();
@@ -57,37 +78,83 @@ namespace SurveyAPI.Controllers
 
         // UPDATE Survey
         [HttpPut("{id}")]
-        public async Task<IActionResult> UpdateSurvey(int id, [FromBody] Survey survey)
+        public async Task<IActionResult> UpdateSurvey(int id, [FromBody] Survey updatedSurvey)
         {
-            Survey? objSurvey = await _context.Surveys.FirstOrDefaultAsync(s => s.Id == id);
-
-            if (objSurvey == null) {
-                return new NotFoundResult();
+            if (id != updatedSurvey.Id)
+            {
+                return BadRequest("Survey ID mismatch.");
             }
 
-            objSurvey.Questions = survey.Questions;
-            objSurvey.Title = survey.Title;
-            objSurvey.Description = survey.Description;
+            var existingSurvey = await _context.Surveys
+                .Include(s => s.Questions)
+                .ThenInclude(q => q.Answers)
+                .FirstOrDefaultAsync(s => s.Id == id);
 
-            _context.SaveChanges();
+            if (existingSurvey == null)
+            {
+                return NotFound("Survey not found.");
+            }
 
-            return Ok();
+            // Update survey fields
+            existingSurvey.Title = updatedSurvey.Title;
+            existingSurvey.Description = updatedSurvey.Description;
+
+            // Update questions
+            foreach (var updatedQuestion in updatedSurvey.Questions)
+            {
+                var existingQuestion = existingSurvey.Questions
+                    .FirstOrDefault(q => q.Id == updatedQuestion.Id);
+                
+                if (existingQuestion != null)
+                {
+                    existingQuestion.Text = updatedQuestion.Text;
+
+                    // Update answers
+                    foreach (var updatedAnswer in updatedQuestion.Answers)
+                    {
+                        var existingAnswer = existingQuestion.Answers
+                            .FirstOrDefault(a => a.Id == updatedAnswer.Id);
+                        if (existingAnswer != null)
+                        {
+                            existingAnswer.Text = updatedAnswer.Text;
+                        }
+                        else
+                        {
+                            existingQuestion.Answers.Add(updatedAnswer);
+                        }
+                    }
+                }
+                else
+                {
+                    updatedQuestion.Id = 0;
+                    updatedQuestion.SurveyId = id;
+                    existingSurvey.Questions.Add(updatedQuestion);
+                }
+            }
+
+            await _context.SaveChangesAsync();
+            return NoContent();
         }
 
         // DELETE Survey
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteSurvey(int id)
         {
-            var survey = await _context.Surveys.FindAsync(id);
+            var survey = await _context.Surveys
+                .Include(s => s.Questions)
+                .ThenInclude(q => q.Answers)
+                .FirstOrDefaultAsync(s => s.Id == id);
+
             if (survey == null)
             {
-                return NotFound();
+                return NotFound("Survey not found.");
             }
 
+            // Remove survey and related data
             _context.Surveys.Remove(survey);
             await _context.SaveChangesAsync();
-
             return NoContent();
         }
+
     }
 }

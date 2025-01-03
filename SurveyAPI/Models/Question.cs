@@ -14,6 +14,7 @@ namespace SurveyAPI.Models
         public int SurveyId { get; set; }
 
         [JsonIgnore]
-        public Survey Survey { get; set; } = null!;
+        public Survey? Survey { get; set; } 
+        public required ICollection<Answer> Answers { get; set; }
     }
 }
